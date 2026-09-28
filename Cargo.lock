@@ -113,6 +113,8 @@ dependencies = [
  "anchor-lang",
  "anchor-spl",
  "litesvm",
+ "solana-account",
+ "solana-clock 3.2.1",
  "solana-keypair",
  "solana-message",
  "solana-signer",
