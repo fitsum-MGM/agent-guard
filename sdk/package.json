@@ -8,7 +8,9 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "demo": "tsx examples/demo.ts"
+    "demo": "tsx examples/demo.ts",
+    "server": "tsx examples/paywall-server.ts",
+    "agent": "tsx examples/agent-buy.ts"
   },
   "keywords": [],
   "author": "",
