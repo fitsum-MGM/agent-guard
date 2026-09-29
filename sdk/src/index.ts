@@ -126,6 +126,62 @@ export class AgentGuard {
       .rpc();
   }
 
+    static requestAddress(policy: PublicKey): PublicKey {
+    return PublicKey.findProgramAddressSync(
+      [Buffer.from("request"), policy.toBuffer()],
+      PROGRAM_ID
+    )[0];
+  }
+
+  /** Agent: ask the owner for a temporary bump to the daily cap. */
+  async requestIncrease(p: {
+    owner: PublicKey;
+    extraAmount: bigint;
+    reason: string;
+    validForSecs: number;
+  }): Promise<string> {
+    const agent = this.signer.publicKey;
+    const policy = AgentGuard.policyAddress(p.owner, agent);
+    const request = AgentGuard.requestAddress(policy);
+    return this.m
+      .requestIncrease(toBN(p.extraAmount), p.reason, toBN(p.validForSecs))
+      .accounts({
+        agent,
+        policy,
+        request,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+  }
+
+  /** Owner: approve or deny the pending request for this agent. */
+  async respondToRequest(agent: PublicKey, approve: boolean): Promise<string> {
+    const owner = this.signer.publicKey;
+    const policy = AgentGuard.policyAddress(owner, agent);
+    const request = AgentGuard.requestAddress(policy);
+    return this.m
+      .respondToRequest(approve)
+      .accounts({ owner, policy, request })
+      .rpc();
+  }
+
+  /** Fetch the pending request for a policy, or null if none exists yet. */
+  async getRequest(owner: PublicKey, agent: PublicKey): Promise<{
+    extraAmount: BN;
+    reason: string;
+    requestedAt: BN;
+    expiresAt: BN;
+    resolved: boolean;
+  } | null> {
+    const policy = AgentGuard.policyAddress(owner, agent);
+    const request = AgentGuard.requestAddress(policy);
+    try {
+      return await (this.program.account as any).increaseRequest.fetch(request);
+    } catch {
+      return null; // no request account created yet
+    }
+  }
+
   /** Agent: pay `recipient` (a wallet address) if every rule allows it. */
   async spend(p: {
     owner: PublicKey;

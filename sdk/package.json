@@ -11,7 +11,8 @@
     "demo": "tsx examples/demo.ts",
     "server": "tsx examples/paywall-server.ts",
     "agent": "tsx examples/agent-buy.ts",
-    "llm-agent": "tsx examples/llm-agent.ts"
+    "llm-agent": "tsx examples/llm-agent.ts",
+    "escalation": "tsx examples/escalation-demo.ts"
   },
   "keywords": [],
   "author": "",
