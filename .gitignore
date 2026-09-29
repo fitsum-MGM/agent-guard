@@ -7,3 +7,4 @@ test-ledger
 .yarn
 .surfpool
 sdk/.keys
+.env

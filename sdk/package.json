@@ -10,7 +10,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "demo": "tsx examples/demo.ts",
     "server": "tsx examples/paywall-server.ts",
-    "agent": "tsx examples/agent-buy.ts"
+    "agent": "tsx examples/agent-buy.ts",
+    "llm-agent": "tsx examples/llm-agent.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,8 +19,10 @@
   "type": "commonjs",
   "dependencies": {
     "@anchor-lang/core": "^1.2.0",
+    "@anthropic-ai/sdk": "^0.129.0",
     "@solana/spl-token": "^0.4.15",
-    "@solana/web3.js": "^1.99.0"
+    "@solana/web3.js": "^1.99.0",
+    "dotenv": "^18.0.4"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
