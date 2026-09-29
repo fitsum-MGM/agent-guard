@@ -149,6 +149,187 @@
       ]
     },
     {
+      "name": "request_increase",
+      "docs": [
+        "Agent: ask the owner for a temporary bump to the daily cap.",
+        "Overwrites any previous request for this policy (init_if_needed)."
+      ],
+      "discriminator": [
+        14,
+        168,
+        9,
+        37,
+        148,
+        240,
+        12,
+        165
+      ],
+      "accounts": [
+        {
+          "name": "agent",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "policy"
+          ]
+        },
+        {
+          "name": "policy",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.owner",
+                "account": "Policy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.agent",
+                "account": "Policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "extra_amount",
+          "type": "u64"
+        },
+        {
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "name": "valid_for_secs",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "respond_to_request",
+      "docs": [
+        "Owner: approve or deny the pending request. Approving raises the daily cap."
+      ],
+      "discriminator": [
+        51,
+        25,
+        57,
+        77,
+        69,
+        171,
+        255,
+        28
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "policy"
+          ]
+        },
+        {
+          "name": "policy",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  108,
+                  105,
+                  99,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy.owner",
+                "account": "Policy"
+              },
+              {
+                "kind": "account",
+                "path": "policy.agent",
+                "account": "Policy"
+              }
+            ]
+          }
+        },
+        {
+          "name": "request",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "policy"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "approve",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "set_allowlist",
       "discriminator": [
         141,
@@ -470,6 +651,19 @@
   ],
   "accounts": [
     {
+      "name": "IncreaseRequest",
+      "discriminator": [
+        213,
+        220,
+        36,
+        178,
+        21,
+        229,
+        35,
+        196
+      ]
+    },
+    {
       "name": "Policy",
       "discriminator": [
         222,
@@ -484,6 +678,32 @@
     }
   ],
   "events": [
+    {
+      "name": "IncreaseRequested",
+      "discriminator": [
+        13,
+        152,
+        139,
+        223,
+        185,
+        216,
+        86,
+        111
+      ]
+    },
+    {
+      "name": "IncreaseResolved",
+      "discriminator": [
+        116,
+        122,
+        136,
+        230,
+        139,
+        137,
+        217,
+        8
+      ]
+    },
     {
       "name": "Spent",
       "discriminator": [
@@ -522,7 +742,7 @@
     {
       "code": 6004,
       "name": "NotAgent",
-      "msg": "Only the policy's agent can spend"
+      "msg": "Only the policy's agent can do this"
     },
     {
       "code": 6005,
@@ -558,9 +778,100 @@
       "code": 6011,
       "name": "MathOverflow",
       "msg": "Math overflow"
+    },
+    {
+      "code": 6012,
+      "name": "ReasonTooLong",
+      "msg": "Reason text is too long"
+    },
+    {
+      "code": 6013,
+      "name": "RequestAlreadyResolved",
+      "msg": "This request was already resolved"
+    },
+    {
+      "code": 6014,
+      "name": "RequestExpired",
+      "msg": "This request has expired"
     }
   ],
   "types": [
+    {
+      "name": "IncreaseRequest",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "extra_amount",
+            "type": "u64"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "requested_at",
+            "type": "i64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          },
+          {
+            "name": "resolved",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IncreaseRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "extra_amount",
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IncreaseResolved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "policy",
+            "type": "pubkey"
+          },
+          {
+            "name": "approved",
+            "type": "bool"
+          },
+          {
+            "name": "extra_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "Policy",
       "type": {

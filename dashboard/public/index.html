@@ -20,6 +20,10 @@
   .event { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1c2530; font-size: 13px; }
   a { color: #58a6ff; }
   input { background: #0b0f14; color: #e6edf3; border: 1px solid #263140; border-radius: 6px; padding: 6px 8px; width: 100%; margin-bottom: 8px; box-sizing: border-box; }
+  #requestCard { border-color: #d29922; }
+  #requestCard button { padding: 6px 14px; border-radius: 6px; border: none; cursor: pointer; font-weight: 600; margin-right: 8px; }
+  #approveBtn { background: #3fb950; color: #0b0f14; }
+  #denyBtn { background: #f85149; color: white; }
 </style>
 </head>
 <body>
@@ -31,17 +35,25 @@
   </div>
 
   <div class="card" id="policyCard">Loading policy...</div>
+  <div class="card" id="requestCard" style="display:none"></div>
   <div class="card">
     <h3 style="margin-top:0">Activity</h3>
     <div id="activity">Loading activity...</div>
   </div>
 
   <script>
+    const API = "http://localhost:5050";
+    const $ = (id) => document.getElementById(id);
+
+    const params = new URLSearchParams(location.search);
+    $("owner").value = params.get("owner") || localStorage.getItem("owner") || "";
+    $("agent").value = params.get("agent") || localStorage.getItem("agent") || "";
 
     function fmt(amountStr) { return (Number(amountStr) / 1e6).toFixed(2); }
     function timeAgo(unix) {
       if (!unix) return "";
       const s = Math.floor(Date.now() / 1000) - unix;
+      if (s < 0) return `in ${Math.floor(-s / 60)}m`;
       if (s < 60) return `${s}s ago`;
       if (s < 3600) return `${Math.floor(s / 60)}m ago`;
       return `${Math.floor(s / 3600)}h ago`;
@@ -99,10 +111,43 @@
       }
     }
 
+    async function refreshRequest() {
+      const owner = $("owner").value.trim();
+      const agent = $("agent").value.trim();
+      if (!owner || !agent) return;
+      const r = await fetch(`${API}/api/request?owner=${owner}&agent=${agent}`).then((x) => x.json());
+      const card = $("requestCard");
+      const now = Math.floor(Date.now() / 1000);
+
+      if (!r || r.resolved || r.expiresAt < now) {
+        card.style.display = "none";
+        return;
+      }
+      card.style.display = "block";
+      card.innerHTML = `
+        <div style="font-weight:600; color:#d29922; margin-bottom:6px">⏳ Agent is requesting more budget</div>
+        <div class="row"><span>Amount</span><span>+${fmt(r.extraAmount)} USDC</span></div>
+        <div class="row"><span>Reason</span><span>${r.reason}</span></div>
+        <div class="row"><span>Expires</span><span>${timeAgo(r.expiresAt)}</span></div>
+        <div style="margin-top:10px">
+          <button id="approveBtn">✅ Approve</button>
+          <button id="denyBtn">❌ Deny</button>
+        </div>
+      `;
+      $("approveBtn").onclick = () =>
+        alert("Approving from the dashboard requires the owner's wallet to sign — run ownerGuard.respondToRequest(agent, true) from the SDK for the live demo.");
+      $("denyBtn").onclick = () =>
+        alert("Denying from the dashboard requires the owner's wallet to sign — run ownerGuard.respondToRequest(agent, false) from the SDK for the live demo.");
+    }
+
     $("owner").addEventListener("change", refresh);
     $("agent").addEventListener("change", refresh);
+    $("owner").addEventListener("change", refreshRequest);
+    $("agent").addEventListener("change", refreshRequest);
     refresh();
-    setInterval(refresh, 5000);
+    refreshRequest();
+    setInterval(refresh, 8000);
+    setInterval(refreshRequest, 8000);
   </script>
 </body>
 </html>
