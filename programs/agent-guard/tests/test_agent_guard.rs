@@ -141,6 +141,53 @@ impl Ctx {
             .to_account_metas(None),
         )
     }
+        fn request_increase_ix(
+        &self,
+        signer: &Pubkey,
+        extra_amount: u64,
+        reason: &str,
+        valid_for_secs: i64,
+    ) -> Instruction {
+        let request = Pubkey::find_program_address(
+            &[b"request", self.policy.as_ref()],
+            &agent_guard::id(),
+        )
+        .0;
+        Instruction::new_with_bytes(
+            agent_guard::id(),
+            &agent_guard::instruction::RequestIncrease {
+                extra_amount,
+                reason: reason.to_string(),
+                valid_for_secs,
+            }
+            .data(),
+            agent_guard::accounts::RequestIncrease {
+                agent: *signer,
+                policy: self.policy,
+                request,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+        )
+    }
+
+    fn respond_ix(&self, signer: &Pubkey, approve: bool) -> Instruction {
+        let request = Pubkey::find_program_address(
+            &[b"request", self.policy.as_ref()],
+            &agent_guard::id(),
+        )
+        .0;
+        Instruction::new_with_bytes(
+            agent_guard::id(),
+            &agent_guard::instruction::RespondToRequest { approve }.data(),
+            agent_guard::accounts::RespondToRequest {
+                owner: *signer,
+                policy: self.policy,
+                request,
+            }
+            .to_account_metas(None),
+        )
+    }
 }
 
 /// Policy: per-tx cap 100 USDC, daily cap 250 USDC, only `merchant` is allowed,
@@ -319,4 +366,86 @@ fn non_owner_cannot_revoke() {
     let stranger = Keypair::try_from(ctx.stranger.to_bytes().as_slice()).unwrap();
     let ix = ctx.revoke_ix(&stranger.pubkey(), true);
     assert_err(ctx.send(ix, &stranger), "NotOwner");
+}
+
+#[test]
+fn owner_can_approve_increase_request() {
+    let mut ctx = setup();
+    let owner = Keypair::try_from(ctx.owner.to_bytes().as_slice()).unwrap();
+    let agent = agent_key(&ctx);
+
+    let req = ctx.request_increase_ix(&agent.pubkey(), 100 * USDC, "need more for a big task", 3600);
+    ctx.send(req, &agent).expect("agent can request an increase");
+
+    let respond = ctx.respond_ix(&owner.pubkey(), true);
+    ctx.send(respond, &owner).expect("owner can approve");
+
+    // Daily cap was 250 USDC; approval should raise it to 350.
+    // Spend 300 total to prove the raised cap is actually enforced on-chain.
+    let ix1 = ctx.spend_ix(&agent.pubkey(), &ctx.merchant_ata, 100 * USDC);
+    ctx.send(ix1, &agent).expect("first 100 fits under either cap");
+    let ix2 = ctx.spend_ix(&agent.pubkey(), &ctx.merchant_ata, 100 * USDC);
+    ctx.send(ix2, &agent).expect("second 100 fits under either cap");
+    let ix3 = ctx.spend_ix(&agent.pubkey(), &ctx.merchant_ata, 100 * USDC);
+    ctx.send(ix3, &agent)
+        .expect("third 100 only fits because the cap was raised to 350");
+
+    let ix4 = ctx.spend_ix(&agent.pubkey(), &ctx.merchant_ata, 60 * USDC);
+    assert_err(ctx.send(ix4, &agent), "ExceedsDailyCap");
+}
+
+#[test]
+fn denied_request_does_not_raise_cap() {
+    let mut ctx = setup();
+    let owner = Keypair::try_from(ctx.owner.to_bytes().as_slice()).unwrap();
+    let agent = agent_key(&ctx);
+
+    let req = ctx.request_increase_ix(&agent.pubkey(), 100 * USDC, "please", 3600);
+    ctx.send(req, &agent).unwrap();
+    let respond = ctx.respond_ix(&owner.pubkey(), false);
+    ctx.send(respond, &owner).expect("owner can deny");
+
+    // Original 250 daily cap should still be enforced.
+    for _ in 0..2 {
+        let ix = ctx.spend_ix(&agent.pubkey(), &ctx.merchant_ata, 100 * USDC);
+        ctx.send(ix, &agent).unwrap();
+    }
+    let ix = ctx.spend_ix(&agent.pubkey(), &ctx.merchant_ata, 100 * USDC);
+    assert_err(ctx.send(ix, &agent), "ExceedsDailyCap");
+}
+
+#[test]
+fn cannot_respond_twice_to_same_request() {
+    let mut ctx = setup();
+    let owner = Keypair::try_from(ctx.owner.to_bytes().as_slice()).unwrap();
+    let agent = agent_key(&ctx);
+
+    let req = ctx.request_increase_ix(&agent.pubkey(), 50 * USDC, "reason", 3600);
+    ctx.send(req, &agent).unwrap();
+    let respond1 = ctx.respond_ix(&owner.pubkey(), true);
+    ctx.send(respond1, &owner).expect("first response succeeds");
+
+    let respond2 = ctx.respond_ix(&owner.pubkey(), true);
+    assert_err(ctx.send(respond2, &owner), "RequestAlreadyResolved");
+}
+
+#[test]
+fn stranger_cannot_request_on_behalf_of_agent() {
+    let mut ctx = setup();
+    let stranger = Keypair::try_from(ctx.stranger.to_bytes().as_slice()).unwrap();
+    let req = ctx.request_increase_ix(&stranger.pubkey(), 50 * USDC, "reason", 3600);
+    assert_err(ctx.send(req, &stranger), "NotAgent");
+}
+
+#[test]
+fn stranger_cannot_approve_request() {
+    let mut ctx = setup();
+    let agent = agent_key(&ctx);
+    let stranger = Keypair::try_from(ctx.stranger.to_bytes().as_slice()).unwrap();
+
+    let req = ctx.request_increase_ix(&agent.pubkey(), 50 * USDC, "reason", 3600);
+    ctx.send(req, &agent).unwrap();
+
+    let respond = ctx.respond_ix(&stranger.pubkey(), true);
+    assert_err(ctx.send(respond, &stranger), "NotOwner");
 }

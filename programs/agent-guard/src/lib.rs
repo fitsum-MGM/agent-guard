@@ -7,6 +7,7 @@ use anchor_spl::token_interface::{
 declare_id!("7HGd3guukPCe4atyc72Z4Uy7hs6r5KzbUFsmxxRTHC9W");
 
 pub const MAX_ALLOWLIST: usize = 8;
+pub const MAX_REASON_LEN: usize = 140;
 pub const SECONDS_PER_DAY: i64 = 86_400;
 
 #[program]
@@ -130,6 +131,63 @@ pub mod agent_guard {
         transfer_checked(cpi_ctx, amount, ctx.accounts.mint.decimals)?;
         Ok(())
     }
+
+    /// Agent: ask the owner for a temporary bump to the daily cap.
+    /// Overwrites any previous request for this policy (init_if_needed).
+    pub fn request_increase(
+        ctx: Context<RequestIncrease>,
+        extra_amount: u64,
+        reason: String,
+        valid_for_secs: i64,
+    ) -> Result<()> {
+        require!(extra_amount > 0, GuardError::ZeroAmount);
+        require!(reason.len() <= MAX_REASON_LEN, GuardError::ReasonTooLong);
+        require!(
+            valid_for_secs > 0 && valid_for_secs <= 7 * SECONDS_PER_DAY,
+            GuardError::InvalidExpiry
+        );
+
+        let now = Clock::get()?.unix_timestamp;
+        let req = &mut ctx.accounts.request;
+        req.policy = ctx.accounts.policy.key();
+        req.extra_amount = extra_amount;
+        req.reason = reason;
+        req.requested_at = now;
+        req.expires_at = now + valid_for_secs;
+        req.resolved = false;
+        req.bump = ctx.bumps.request;
+
+        emit!(IncreaseRequested {
+            policy: ctx.accounts.policy.key(),
+            extra_amount: req.extra_amount,
+            expires_at: req.expires_at,
+        });
+        Ok(())
+    }
+
+    /// Owner: approve or deny the pending request. Approving raises the daily cap.
+    pub fn respond_to_request(ctx: Context<RespondToRequest>, approve: bool) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let req = &mut ctx.accounts.request;
+        require!(!req.resolved, GuardError::RequestAlreadyResolved);
+        require!(now < req.expires_at, GuardError::RequestExpired);
+
+        req.resolved = true;
+        if approve {
+            let policy = &mut ctx.accounts.policy;
+            policy.daily_cap = policy
+                .daily_cap
+                .checked_add(req.extra_amount)
+                .ok_or(GuardError::MathOverflow)?;
+        }
+
+        emit!(IncreaseResolved {
+            policy: ctx.accounts.policy.key(),
+            approved: approve,
+            extra_amount: req.extra_amount,
+        });
+        Ok(())
+    }
 }
 
 #[account]
@@ -149,6 +207,19 @@ pub struct Policy {
     pub bump: u8,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct IncreaseRequest {
+    pub policy: Pubkey,
+    pub extra_amount: u64,
+    #[max_len(140)]
+    pub reason: String,
+    pub requested_at: i64,
+    pub expires_at: i64,
+    pub resolved: bool,
+    pub bump: u8,
+}
+
 #[event]
 pub struct Spent {
     pub policy: Pubkey,
@@ -156,6 +227,20 @@ pub struct Spent {
     pub amount: u64,
     pub spent_today: u64,
     pub timestamp: i64,
+}
+
+#[event]
+pub struct IncreaseRequested {
+    pub policy: Pubkey,
+    pub extra_amount: u64,
+    pub expires_at: i64,
+}
+
+#[event]
+pub struct IncreaseResolved {
+    pub policy: Pubkey,
+    pub approved: bool,
+    pub extra_amount: u64,
 }
 
 #[derive(Accounts)]
@@ -249,6 +334,45 @@ pub struct Withdraw<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+#[derive(Accounts)]
+pub struct RequestIncrease<'info> {
+    #[account(mut)]
+    pub agent: Signer<'info>,
+    #[account(
+        has_one = agent @ GuardError::NotAgent,
+        seeds = [b"policy", policy.owner.as_ref(), policy.agent.as_ref()],
+        bump = policy.bump
+    )]
+    pub policy: Account<'info, Policy>,
+    #[account(
+        init_if_needed,
+        payer = agent,
+        space = 8 + IncreaseRequest::INIT_SPACE,
+        seeds = [b"request", policy.key().as_ref()],
+        bump
+    )]
+    pub request: Account<'info, IncreaseRequest>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RespondToRequest<'info> {
+    pub owner: Signer<'info>,
+    #[account(
+        mut,
+        has_one = owner @ GuardError::NotOwner,
+        seeds = [b"policy", policy.owner.as_ref(), policy.agent.as_ref()],
+        bump = policy.bump
+    )]
+    pub policy: Account<'info, Policy>,
+    #[account(
+        mut,
+        seeds = [b"request", policy.key().as_ref()],
+        bump = request.bump
+    )]
+    pub request: Account<'info, IncreaseRequest>,
+}
+
 #[error_code]
 pub enum GuardError {
     #[msg("Caps must be positive and per-tx cap must not exceed the daily cap")]
@@ -259,7 +383,7 @@ pub enum GuardError {
     InvalidExpiry,
     #[msg("Only the policy owner can do this")]
     NotOwner,
-    #[msg("Only the policy's agent can spend")]
+    #[msg("Only the policy's agent can do this")]
     NotAgent,
     #[msg("This policy has been revoked")]
     Revoked,
@@ -275,4 +399,10 @@ pub enum GuardError {
     RecipientNotAllowed,
     #[msg("Math overflow")]
     MathOverflow,
+    #[msg("Reason text is too long")]
+    ReasonTooLong,
+    #[msg("This request was already resolved")]
+    RequestAlreadyResolved,
+    #[msg("This request has expired")]
+    RequestExpired,
 }

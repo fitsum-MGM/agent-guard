@@ -37,12 +37,6 @@
   </div>
 
   <script>
-    const API = "http://localhost:5050";
-    const $ = (id) => document.getElementById(id);
-
-    const params = new URLSearchParams(location.search);
-    $("owner").value = params.get("owner") || localStorage.getItem("owner") || "";
-    $("agent").value = params.get("agent") || localStorage.getItem("agent") || "";
 
     function fmt(amountStr) { return (Number(amountStr) / 1e6).toFixed(2); }
     function timeAgo(unix) {
